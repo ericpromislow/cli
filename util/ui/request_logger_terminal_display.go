@@ -55,7 +55,7 @@ func (display *RequestLoggerTerminalDisplay) DisplayJSONBody(body []byte) error 
 		return nil
 	}
 
-	fmt.Fprintf(display.ui.Out, "%s\n", string(sanitized))
+	fmt.Fprintf(display.ui.Out, "\n%s\n", string(sanitized))
 
 	return nil
 }
