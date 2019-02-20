@@ -473,6 +473,18 @@ var _ = Describe("Login Command", func() {
 				})
 			})
 
+			FContext("client credentials", func() {
+				When("the user passes --client-id and --client-secret", func() {
+					It("logs them in", func() {
+						Flags = []string{"--client-id", "nick", "--client-secret", "fury", "-a", "api.example.com"}
+
+						success := testcmd.RunCLICommand("login", Flags, nil, updateCommandDependency, false, ui)
+						Expect(success).To(BeTrue())
+						Expect(authRepo.AuthenticateCallCount()).To(Equal(1))
+					})
+				})
+			})
+
 			Context("when multiple prompts of password type are given", func() {
 				BeforeEach(func() {
 					authRepo.GetLoginPromptsAndSaveUAAServerURLReturns(map[string]coreconfig.AuthPrompt{

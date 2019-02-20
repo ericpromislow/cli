@@ -119,6 +119,10 @@ func (uaa UAARepository) Authenticate(credentials map[string]string) error {
 		data[key] = []string{val}
 	}
 
+	if _, ok := credentials["client_id"]; ok {
+		data["grant_type"] = []string{"client_credentials"}
+	}
+
 	err := uaa.getAuthToken(data)
 	if err != nil {
 		httpError, ok := err.(errors.HTTPError)

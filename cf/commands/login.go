@@ -43,6 +43,8 @@ func (cmd *Login) MetaData() commandregistry.CommandMetadata {
 	fs["p"] = &flags.StringFlag{ShortName: "p", Usage: T("Password")}
 	fs["o"] = &flags.StringFlag{ShortName: "o", Usage: T("Org")}
 	fs["s"] = &flags.StringFlag{ShortName: "s", Usage: T("Space")}
+	fs["client-id"] = &flags.StringFlag{Name: "client-id", Usage: T("Client ID")}
+	fs["client-secret"] = &flags.StringFlag{Name: "client-secret", Usage: T("Client Secret")}
 	fs["sso"] = &flags.BoolFlag{Name: "sso", Usage: T("Prompt for a one-time passcode to login")}
 	fs["sso-passcode"] = &flags.StringFlag{Name: "sso-passcode", Usage: T("One-time passcode")}
 	fs["skip-ssl-validation"] = &flags.BoolFlag{Name: "skip-ssl-validation", Usage: T("Skip verification of the API endpoint. Not recommended!")}
@@ -128,6 +130,11 @@ func (cmd *Login) Execute(c flags.FlagContext) error {
 		if err != nil {
 			return err
 		}
+	case c.IsSet("client-id") || c.IsSet("client-secret"):
+		err = cmd.authenticateClientCredentials(c)
+		if err != nil {
+			return err
+		}
 	default:
 		err = cmd.authenticate(c)
 		if err != nil {
@@ -147,6 +154,32 @@ func (cmd *Login) Execute(c flags.FlagContext) error {
 		}
 	}
 	cmd.ui.NotifyUpdateIfNeeded(cmd.config)
+	return nil
+}
+
+func (cmd Login) authenticateClientCredentials(c flags.FlagContext) error {
+	clientFlagValue := c.String("client-id")
+	secretFlagValue := c.String("client-secret")
+
+	if clientFlagValue == "" && secretFlagValue == "" {
+		return errors.New("missing values for client id / secret")
+	}
+
+	credentials := make(map[string]string)
+	credentials["client_id"] = clientFlagValue
+	credentials["client_secret"] = secretFlagValue
+
+	cmd.ui.Say(T("Authenticating..."))
+	err := cmd.authenticator.Authenticate(credentials)
+
+	if err != nil {
+		cmd.ui.Say(err.Error())
+		return err
+	}
+
+	cmd.ui.Ok()
+	cmd.ui.Say("")
+
 	return nil
 }
 

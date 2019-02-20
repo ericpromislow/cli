@@ -17,6 +17,8 @@ type LoginActor interface {
 
 type LoginCommand struct {
 	APIEndpoint       string      `short:"a" description:"API endpoint (e.g. https://api.example.com)"`
+	ClientID          string      `long:"client-id" description:"client id"`
+	ClientSecret      string      `long:"client-secret" description:"client secret"`
 	Organization      string      `short:"o" description:"Org"`
 	Password          string      `short:"p" description:"Password"`
 	Space             string      `short:"s" description:"Space"`
