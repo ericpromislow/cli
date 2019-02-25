@@ -12,11 +12,11 @@ import (
 
 const PushRetries = 3
 
-func (actor Actor) Actualize(state PushState, progressBar ProgressBar) (
-	<-chan PushState, <-chan Event, <-chan Warnings, <-chan error,
+func (actor Actor) Actualize(state PushPlan, progressBar ProgressBar) (
+	<-chan PushPlan, <-chan Event, <-chan Warnings, <-chan error,
 ) {
-	log.Debugln("Starting to Actualize Push State:", state)
-	stateStream := make(chan PushState)
+	log.Debugln("Starting to Actualize Push plan:", state)
+	stateStream := make(chan PushPlan)
 	eventStream := make(chan Event)
 	warningsStream := make(chan Warnings)
 	errorStream := make(chan error)
@@ -130,7 +130,7 @@ func (actor Actor) Actualize(state PushState, progressBar ProgressBar) (
 	return stateStream, eventStream, warningsStream, errorStream
 }
 
-func (actor Actor) ApplyManifest(state PushState, warningsStream chan Warnings, eventStream chan Event) error {
+func (actor Actor) ApplyManifest(state PushPlan, warningsStream chan Warnings, eventStream chan Event) error {
 	eventStream <- ApplyManifest
 	warnings, err := actor.V7Actor.SetApplicationManifest(state.Application.GUID, state.Manifest)
 	warningsStream <- Warnings(warnings)
@@ -142,7 +142,7 @@ func (actor Actor) ApplyManifest(state PushState, warningsStream chan Warnings, 
 	return nil
 }
 
-func (actor Actor) CreateAndUploadApplicationBits(state PushState, progressBar ProgressBar, warningsStream chan Warnings, eventStream chan Event) (v7action.Package, error) {
+func (actor Actor) CreateAndUploadApplicationBits(state PushPlan, progressBar ProgressBar, warningsStream chan Warnings, eventStream chan Event) (v7action.Package, error) {
 	log.WithField("Path", state.BitsPath).Info(string(CreatingArchive))
 
 	eventStream <- CreatingArchive
@@ -193,7 +193,7 @@ func (actor Actor) CreateAndUploadApplicationBits(state PushState, progressBar P
 	return pkg, nil
 }
 
-func (actor Actor) updateApplication(state PushState, warningsStream chan Warnings) (PushState, error) {
+func (actor Actor) updateApplication(state PushPlan, warningsStream chan Warnings) (PushPlan, error) {
 	if !state.ApplicationNeedsUpdate {
 		return state, nil
 	}
@@ -210,7 +210,7 @@ func (actor Actor) updateApplication(state PushState, warningsStream chan Warnin
 	return state, nil
 }
 
-func (actor Actor) CreatePackage(state PushState, progressBar ProgressBar, warningsStream chan Warnings, eventStream chan Event) (v7action.Package, error) {
+func (actor Actor) CreatePackage(state PushPlan, progressBar ProgressBar, warningsStream chan Warnings, eventStream chan Event) (v7action.Package, error) {
 	if state.Application.LifecycleType == constant.AppLifecycleTypeDocker {
 		eventStream <- SetDockerImage
 		pkg, warnings, err := actor.V7Actor.CreateDockerPackageByApplication(state.Application.GUID, v7action.DockerImageCredentials{
@@ -229,14 +229,14 @@ func (actor Actor) CreatePackage(state PushState, progressBar ProgressBar, warni
 	return actor.CreateAndUploadApplicationBits(state, progressBar, warningsStream, eventStream)
 }
 
-func (actor Actor) GetArchivePath(state PushState) (string, error) {
+func (actor Actor) GetArchivePath(state PushPlan) (string, error) {
 	if state.Archive {
 		return actor.SharedActor.ZipArchiveResources(state.BitsPath, state.AllResources)
 	}
 	return actor.SharedActor.ZipDirectoryResources(state.BitsPath, state.AllResources)
 }
 
-func (actor Actor) ScaleProcess(state PushState, warningsStream chan Warnings, eventStream chan Event) error {
+func (actor Actor) ScaleProcess(state PushPlan, warningsStream chan Warnings, eventStream chan Event) error {
 	if shouldScaleProcess(state) {
 		log.Info("Scaling Web Process")
 		eventStream <- ScaleWebProcess
@@ -258,11 +258,11 @@ func (actor Actor) ScaleProcess(state PushState, warningsStream chan Warnings, e
 	return nil
 }
 
-func shouldScaleProcess(state PushState) bool {
+func shouldScaleProcess(state PushPlan) bool {
 	return state.Overrides.Memory.IsSet || state.Overrides.Instances.IsSet || state.Overrides.Disk.IsSet
 }
 
-func (actor Actor) UpdateProcess(state PushState, warningsStream chan Warnings, eventStream chan Event) error {
+func (actor Actor) UpdateProcess(state PushPlan, warningsStream chan Warnings, eventStream chan Event) error {
 	if state.Overrides.StartCommand.IsSet || state.Overrides.HealthCheckType != "" {
 		log.Info("Setting Web Process's Configuration")
 		eventStream <- SetProcessConfiguration

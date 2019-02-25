@@ -40,9 +40,9 @@ type PushActor interface {
 	// Prepare the space by creating needed apps/applying the manifest
 	PrepareSpace(spaceGUID string, appName string, parser *manifestparser.Parser, overrides v7pushaction.FlagOverrides) (<-chan []string, <-chan v7pushaction.Event, <-chan v7pushaction.Warnings, <-chan error)
 	// Actualize applies any necessary changes.
-	Actualize(state v7pushaction.PushState, progressBar v7pushaction.ProgressBar) (<-chan v7pushaction.PushState, <-chan v7pushaction.Event, <-chan v7pushaction.Warnings, <-chan error)
+	Actualize(state v7pushaction.PushPlan, progressBar v7pushaction.ProgressBar) (<-chan v7pushaction.PushPlan, <-chan v7pushaction.Event, <-chan v7pushaction.Warnings, <-chan error)
 	// Conceptualize figures out the state of the world.
-	Conceptualize(appName []string, spaceGUID string, orgGUID string, currentDir string, flagOverrides v7pushaction.FlagOverrides) ([]v7pushaction.PushState, v7pushaction.Warnings, error)
+	Conceptualize(appName []string, spaceGUID string, orgGUID string, currentDir string, flagOverrides v7pushaction.FlagOverrides) ([]v7pushaction.PushPlan, v7pushaction.Warnings, error)
 }
 
 //go:generate counterfeiter . V7ActorForPush
@@ -166,7 +166,7 @@ func (cmd PushCommand) Execute(args []string) error {
 
 	cmd.UI.DisplayText("Getting app info...")
 	log.Info("generating the app state")
-	pushState, warnings, err := cmd.Actor.Conceptualize(
+	pushPlans, warnings, err := cmd.Actor.Conceptualize(
 		appNames,
 		cmd.Config.TargetedSpace().GUID,
 		cmd.Config.TargetedOrganization().GUID,
@@ -177,9 +177,9 @@ func (cmd PushCommand) Execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	log.WithField("number of states", len(pushState)).Debug("completed generating state")
+	log.WithField("number of states", len(pushPlans)).Debug("completed generating state")
 
-	for _, state := range pushState {
+	for _, state := range pushPlans {
 		log.WithField("app_name", state.Application.Name).Info("actualizing")
 		stateStream, eventStream, warningsStream, errorStream := cmd.Actor.Actualize(state, cmd.ProgressBar)
 		updatedState, err := cmd.processApplyStreams(state.Application.Name, stateStream, eventStream, warningsStream, errorStream)
@@ -316,13 +316,13 @@ func (cmd PushCommand) processStreamsFromPrepareSpace(
 
 func (cmd PushCommand) processApplyStreams(
 	appName string,
-	stateStream <-chan v7pushaction.PushState,
+	stateStream <-chan v7pushaction.PushPlan,
 	eventStream <-chan v7pushaction.Event,
 	warningsStream <-chan v7pushaction.Warnings,
 	errorStream <-chan error,
-) (v7pushaction.PushState, error) {
+) (v7pushaction.PushPlan, error) {
 	var stateClosed, eventClosed, warningsClosed, errClosed, complete bool
-	var updateState v7pushaction.PushState
+	var updateState v7pushaction.PushPlan
 
 	for {
 		select {
@@ -361,7 +361,7 @@ func (cmd PushCommand) processApplyStreams(
 				errClosed = true
 				break
 			}
-			return v7pushaction.PushState{}, err
+			return v7pushaction.PushPlan{}, err
 		}
 
 		if stateClosed && eventClosed && warningsClosed && complete {

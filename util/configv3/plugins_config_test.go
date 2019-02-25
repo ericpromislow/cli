@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	. "code.cloudfoundry.org/cli/util/configv3"
+	"fmt"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
@@ -378,7 +379,9 @@ var _ = Describe("PluginsConfig", func() {
 
 				It("returns the error", func() {
 					err := config.WritePluginConfig()
-					_, ok := err.(*os.PathError)
+					fmt.Fprintf(os.Stdout, "\n error: %v,\n", err)
+					msg, ok := err.(*os.PathError)
+					fmt.Fprintf(os.Stdout, "msg: %s, ok: %v\n", msg, ok)
 					Expect(ok).To(BeTrue())
 				})
 			})

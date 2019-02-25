@@ -17,7 +17,7 @@ import (
 	. "github.com/onsi/gomega/gstruct"
 )
 
-var _ = Describe("Push State", func() {
+var _ = Describe("Push plan", func() {
 	var (
 		actor           *Actor
 		fakeV7Actor     *v7pushactionfakes.FakeV7Actor
@@ -38,7 +38,7 @@ var _ = Describe("Push State", func() {
 			currentDir    string
 			flagOverrides FlagOverrides
 
-			states     []PushState
+			states     []PushPlan
 			warnings   Warnings
 			executeErr error
 		)
@@ -81,7 +81,7 @@ var _ = Describe("Push State", func() {
 					fakeV7Actor.GetApplicationsByNamesAndSpaceReturns(apps, v7action.Warnings{"plural-get-warning"}, nil)
 				})
 
-				It("returns multiple push states", func() {
+				It("returns multiple push plans", func() {
 					Expect(executeErr).ToNot(HaveOccurred())
 					Expect(warnings).To(ConsistOf("plural-get-warning"))
 					Expect(states).To(HaveLen(len(apps)))
@@ -119,7 +119,7 @@ var _ = Describe("Push State", func() {
 			})
 		})
 
-		Describe("Push state construction", func() {
+		Describe("Push plan construction", func() {
 			var apps = []v7action.Application{
 				{
 					GUID: "app-guid-0",
@@ -194,7 +194,7 @@ var _ = Describe("Push State", func() {
 					var providedPath string
 
 					BeforeEach(func() {
-						archive, err := ioutil.TempFile("", "push-state-provided-path")
+						archive, err := ioutil.TempFile("", "push-plan-provided-path")
 						Expect(err).ToNot(HaveOccurred())
 						defer archive.Close()
 
@@ -224,7 +224,7 @@ var _ = Describe("Push State", func() {
 							fakeSharedActor.GatherDirectoryResourcesReturns(resources, nil)
 						})
 
-						It("adds the gathered resources to the push state", func() {
+						It("adds the gathered resources to the push plan", func() {
 							Expect(executeErr).ToNot(HaveOccurred())
 							Expect(fakeSharedActor.GatherDirectoryResourcesCallCount()).To(Equal(3))
 							Expect(fakeSharedActor.GatherDirectoryResourcesArgsForCall(0)).To(Equal(pwd))
@@ -252,7 +252,7 @@ var _ = Describe("Push State", func() {
 					var archivePath string
 
 					BeforeEach(func() {
-						archive, err := ioutil.TempFile("", "push-state-archive")
+						archive, err := ioutil.TempFile("", "push-plan-archive")
 						Expect(err).ToNot(HaveOccurred())
 						defer archive.Close()
 
@@ -276,7 +276,7 @@ var _ = Describe("Push State", func() {
 							fakeSharedActor.GatherArchiveResourcesReturns(resources, nil)
 						})
 
-						It("adds the gathered resources to the push state", func() {
+						It("adds the gathered resources to the push plan", func() {
 							Expect(executeErr).ToNot(HaveOccurred())
 							Expect(fakeSharedActor.GatherArchiveResourcesCallCount()).To(Equal(3))
 							Expect(fakeSharedActor.GatherArchiveResourcesArgsForCall(0)).To(Equal(archivePath))
