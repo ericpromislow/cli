@@ -1,7 +1,6 @@
 package v7action
 
 import (
-	"code.cloudfoundry.org/cli/api/cloudcontroller/ccv3"
 	"code.cloudfoundry.org/cli/types"
 )
 
