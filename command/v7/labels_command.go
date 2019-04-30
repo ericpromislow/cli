@@ -10,7 +10,15 @@ import (
 	"code.cloudfoundry.org/cli/command/v7/shared"
 	"code.cloudfoundry.org/cli/types"
 	"code.cloudfoundry.org/cli/util/ui"
+	"fmt"
 )
+
+//go:generate counterfeiter . GetLabelActor
+
+type GetLabelActor interface {
+	GetApplicationLabels(appName string, spaceGUID string) (map[string]types.NullString, v7action.Warnings, error)
+	GetOrganizationLabels(appName string) ( map[string]types.NullString, v7action.Warnings, error)
+}
 
 type LabelsCommand struct {
 	RequiredArgs flag.LabelsArgs `positional-args:"yes"`
@@ -18,7 +26,7 @@ type LabelsCommand struct {
 	UI           command.UI
 	Config       command.Config
 	SharedActor  command.SharedActor
-	Actor        AppActor
+	Actor        GetLabelActor
 }
 
 func (cmd *LabelsCommand) Setup(config command.Config, ui command.UI) error {
@@ -34,12 +42,24 @@ func (cmd *LabelsCommand) Setup(config command.Config, ui command.UI) error {
 }
 
 func (cmd LabelsCommand) Execute(args []string) error {
-	err := cmd.SharedActor.CheckTarget(true, true)
+	username, err := cmd.Config.CurrentUserName()
 	if err != nil {
 		return err
 	}
+	switch cmd.RequiredArgs.ResourceType {
+	case "app":
+		err = cmd.executeApp(username)
+	case "org":
+		err = cmd.executeOrg(username)
+	default:
+		err = fmt.Errorf("Unsupported resource type of '%s'", cmd.RequiredArgs.ResourceType)
 
-	username, err := cmd.Config.CurrentUserName()
+	}
+	return err
+}
+
+func (cmd LabelsCommand) executeApp(username string) error {
+	err := cmd.SharedActor.CheckTarget(true, true)
 	if err != nil {
 		return err
 	}
@@ -52,21 +72,40 @@ func (cmd LabelsCommand) Execute(args []string) error {
 	})
 
 	cmd.UI.DisplayNewline()
-
-	app, warnings, err := cmd.Actor.GetApplicationByNameAndSpace(cmd.RequiredArgs.ResourceName, cmd.Config.TargetedSpace().GUID)
-
+	labels, warnings, err := cmd.Actor.GetApplicationLabels(cmd.RequiredArgs.ResourceName, cmd.Config.TargetedSpace().GUID)
 	cmd.UI.DisplayWarnings(warnings)
 	if err != nil {
 		return err
 	}
+	cmd.printLabels(labels)
+	return nil
+}
 
-	var labels map[string]types.NullString
-	if app.Metadata != nil {
-		labels = app.Metadata.Labels
+func (cmd LabelsCommand) executeOrg(username string) error {
+	err := cmd.SharedActor.CheckTarget(false, false)
+	if err != nil {
+		return err
 	}
+
+	cmd.UI.DisplayTextWithFlavor("Getting labels for org {{.OrgName}} as {{.Username}}...", map[string]interface{}{
+		"OrgName":   cmd.Config.TargetedOrganization().Name,
+		"Username":  username,
+	})
+
+	cmd.UI.DisplayNewline()
+
+	_, warnings, err := cmd.Actor.GetOrganizationLabels(cmd.RequiredArgs.ResourceName)
+	cmd.UI.DisplayWarnings(warnings)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cmd LabelsCommand) printLabels(labels map[string]types.NullString) {
 	if len(labels) == 0 {
 		cmd.UI.DisplayText("No labels found.")
-		return nil
+		return
 	}
 
 	keys := make([]string, 0, len(labels))
@@ -87,6 +126,4 @@ func (cmd LabelsCommand) Execute(args []string) error {
 	}
 
 	cmd.UI.DisplayTableWithHeader("", table, ui.DefaultTableSpacePadding)
-
-	return nil
 }
