@@ -10,47 +10,37 @@ import (
 	"code.cloudfoundry.org/cli/command/flag"
 	"code.cloudfoundry.org/cli/command/v7/shared"
 	"code.cloudfoundry.org/cli/types"
-	"code.cloudfoundry.org/clock"
 )
 
-//go:generate counterfeiter . LabelSetter
+//go:generate counterfeiter . SetLabelActor
 
-type LabelSetter interface {
-	Execute(resource TargetResource, labels map[string]types.NullString) error
+type SetLabelActor interface {
+	UpdateApplicationLabelsByApplicationName(string, string, map[string]types.NullString) (v7action.Warnings, error)
+	UpdateOrganizationLabelsByOrganizationName(string, map[string]types.NullString) (v7action.Warnings, error)
 }
 
 type SetLabelCommand struct {
-	RequiredArgs    flag.SetLabelArgs `positional-args:"yes"`
-	usage           interface{}       `usage:"CF_NAME set-label RESOURCE RESOURCE_NAME KEY=VALUE...\n\nEXAMPLES:\n   cf set-label app dora env=production\n   cf set-label org business pci=true public-facing=false\n   cf set-label buildpack go_buildpack go=1.12 -s cflinuxfs3\n\nRESOURCES:\n   app\n   buildpack\n   domain\n   org\n   route\n   service-broker\n   space\n   stack"`
-	relatedCommands interface{}       `related_commands:"labels, unset-label"`
-	BuildpackStack  string            `long:"stack" short:"s" description:"Specify stack to disambiguate buildpacks with the same name"`
-	LabelSetter     LabelSetter
+	RequiredArgs flag.SetLabelArgs `positional-args:"yes"`
+	usage        interface{}       `usage:"CF_NAME set-label RESOURCE RESOURCE_NAME KEY=VALUE...\n\nEXAMPLES:\n   cf set-label app dora env=production\n   cf set-label org business pci=true public-facing=false\n   cf set-label space business_space public-facing=false owner=jane_doe\n\nRESOURCES:\n   app\n   org\n   space\n\nSEE ALSO:\n   delete-label, labels"`
+	UI           command.UI
+	Config       command.Config
+	SharedActor  command.SharedActor
+	Actor        SetLabelActor
 }
 
 func (cmd *SetLabelCommand) Setup(config command.Config, ui command.UI) error {
-	sharedActor := sharedaction.NewActor(config)
-	ccClient, _, err := shared.GetNewClientsAndConnectToCF(config, ui, "")
+	cmd.UI = ui
+	cmd.Config = config
+	cmd.SharedActor = sharedaction.NewActor(config)
+	ccClient, _, err := shared.NewClients(config, ui, true, "")
 	if err != nil {
 		return err
 	}
-	actor := v7action.NewActor(ccClient, config, nil, nil, clock.NewClock())
-
-	cmd.LabelSetter = &LabelUpdater{
-		UI:          ui,
-		Config:      config,
-		SharedActor: sharedActor,
-		Actor:       actor,
-		Action:      Set,
-	}
+	cmd.Actor = v7action.NewActor(ccClient, config, nil, nil)
 	return nil
 }
 
 func (cmd SetLabelCommand) Execute(args []string) error {
-	targetResource := TargetResource{
-		ResourceType:   cmd.RequiredArgs.ResourceType,
-		ResourceName:   cmd.RequiredArgs.ResourceName,
-		BuildpackStack: cmd.BuildpackStack,
-	}
 
 	labels := make(map[string]types.NullString)
 	for _, label := range cmd.RequiredArgs.Labels {
@@ -61,5 +51,79 @@ func (cmd SetLabelCommand) Execute(args []string) error {
 		labels[parts[0]] = types.NewNullString(parts[1])
 	}
 
-	return cmd.LabelSetter.Execute(targetResource, labels)
+	username, err := cmd.Config.CurrentUserName()
+	if err != nil {
+		return err
+	}
+
+	switch cmd.RequiredArgs.ResourceType {
+	case "app":
+		err = cmd.executeApp(username, labels)
+
+	case "org":
+		err = cmd.executeOrg(username, labels)
+	default:
+		err = fmt.Errorf("Unsupported resource type of '%s'", cmd.RequiredArgs.ResourceType)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	cmd.UI.DisplayOK()
+	return nil
+}
+
+func (cmd SetLabelCommand) executeOrg(username string, labels map[string]types.NullString) error {
+	err := cmd.SharedActor.CheckTarget(false, false)
+	if err != nil {
+		return err
+	}
+
+	preFlavoringText := fmt.Sprintf("Setting label(s) for %s {{.ResourceName}} as {{.User}}...", cmd.RequiredArgs.ResourceType)
+	cmd.UI.DisplayTextWithFlavor(
+		preFlavoringText,
+		map[string]interface{}{
+			"ResourceName": cmd.RequiredArgs.ResourceName,
+			"OrgName":      cmd.Config.TargetedOrganization().Name,
+			"User":         username,
+		},
+	)
+
+	warnings, err := cmd.Actor.UpdateOrganizationLabelsByOrganizationName(cmd.RequiredArgs.ResourceName,
+		labels)
+	cmd.UI.DisplayWarnings(warnings)
+
+	return err
+}
+
+func (cmd SetLabelCommand) executeApp(username string, labels map[string]types.NullString) error {
+	err := cmd.SharedActor.CheckTarget(true, true)
+	if err != nil {
+		return err
+	}
+
+	appName := cmd.RequiredArgs.ResourceName
+
+	preFlavoringText := fmt.Sprintf("Setting label(s) for %s {{.ResourceName}} in org {{.OrgName}} / space {{.SpaceName}} as {{.User}}...", cmd.RequiredArgs.ResourceType)
+	cmd.UI.DisplayTextWithFlavor(
+		preFlavoringText,
+		map[string]interface{}{
+			"ResourceName": appName,
+			"OrgName":      cmd.Config.TargetedOrganization().Name,
+			"SpaceName":    cmd.Config.TargetedSpace().Name,
+			"User":         username,
+		},
+	)
+
+	warnings, err := cmd.Actor.UpdateApplicationLabelsByApplicationName(appName,
+		cmd.Config.TargetedSpace().GUID,
+		labels)
+
+	cmd.UI.DisplayWarnings(warnings)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

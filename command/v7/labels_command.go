@@ -1,115 +1,67 @@
 package v7
 
 import (
-	"fmt"
 	"sort"
-	"strings"
 
 	"code.cloudfoundry.org/cli/actor/sharedaction"
 	"code.cloudfoundry.org/cli/actor/v7action"
 	"code.cloudfoundry.org/cli/command"
 	"code.cloudfoundry.org/cli/command/flag"
-	"code.cloudfoundry.org/cli/command/translatableerror"
 	"code.cloudfoundry.org/cli/command/v7/shared"
 	"code.cloudfoundry.org/cli/types"
 	"code.cloudfoundry.org/cli/util/ui"
-	"code.cloudfoundry.org/clock"
+	"fmt"
 )
 
-type ResourceType string
+//go:generate counterfeiter . GetLabelActor
 
-const (
-	App           ResourceType = "app"
-	Buildpack     ResourceType = "buildpack"
-	Domain        ResourceType = "domain"
-	Org           ResourceType = "org"
-	Route         ResourceType = "route"
-	Space         ResourceType = "space"
-	Stack         ResourceType = "stack"
-	ServiceBroker ResourceType = "service-broker"
-)
-
-//go:generate counterfeiter . LabelsActor
-
-type LabelsActor interface {
+type GetLabelActor interface {
 	GetApplicationLabels(appName string, spaceGUID string) (map[string]types.NullString, v7action.Warnings, error)
-	GetDomainLabels(domainName string) (map[string]types.NullString, v7action.Warnings, error)
-	GetOrganizationLabels(orgName string) (map[string]types.NullString, v7action.Warnings, error)
-	GetRouteLabels(routeName string, spaceGUID string) (map[string]types.NullString, v7action.Warnings, error)
-	GetSpaceLabels(spaceName string, orgGUID string) (map[string]types.NullString, v7action.Warnings, error)
-	GetBuildpackLabels(buildpackName string, buildpackStack string) (map[string]types.NullString, v7action.Warnings, error)
-	GetStackLabels(stackName string) (map[string]types.NullString, v7action.Warnings, error)
+	GetOrganizationLabels(appName string) ( map[string]types.NullString, v7action.Warnings, error)
 }
 
 type LabelsCommand struct {
-	RequiredArgs    flag.LabelsArgs `positional-args:"yes"`
-	BuildpackStack  string          `long:"stack" short:"s" description:"Specify stack to disambiguate buildpacks with the same name"`
-	usage           interface{}     `usage:"CF_NAME labels RESOURCE RESOURCE_NAME\n\nEXAMPLES:\n   cf labels app dora\n   cf labels org business\n   cf labels buildpack go_buildpack --stack cflinuxfs3 \n\nRESOURCES:\n   app\n   buildpack\n   domain\n   org\n   route\n   space\n   stack"`
-	relatedCommands interface{}     `related_commands:"set-label, unset-label"`
-	UI              command.UI
-	Config          command.Config
-	SharedActor     command.SharedActor
-	Actor           LabelsActor
+	RequiredArgs flag.LabelsArgs `positional-args:"yes"`
+	usage        interface{}     `usage:"CF_NAME labels RESOURCE RESOURCE_NAME\n\nEXAMPLES:\n   cf labels app dora \n\nRESOURCES:\n   app\n\nSEE ALSO:\n   set-label, delete-label"`
+	UI           command.UI
+	Config       command.Config
+	SharedActor  command.SharedActor
+	Actor        GetLabelActor
 }
 
 func (cmd *LabelsCommand) Setup(config command.Config, ui command.UI) error {
 	cmd.UI = ui
 	cmd.Config = config
 	cmd.SharedActor = sharedaction.NewActor(config)
-	ccClient, _, err := shared.GetNewClientsAndConnectToCF(config, ui, "")
+	ccClient, _, err := shared.NewClients(config, ui, true, "")
 	if err != nil {
 		return err
 	}
-	cmd.Actor = v7action.NewActor(ccClient, config, nil, nil, clock.NewClock())
+	cmd.Actor = v7action.NewActor(ccClient, config, nil, nil)
 	return nil
 }
 
 func (cmd LabelsCommand) Execute(args []string) error {
-	var (
-		labels   map[string]types.NullString
-		warnings v7action.Warnings
-	)
 	username, err := cmd.Config.CurrentUserName()
 	if err != nil {
 		return err
 	}
-
-	err = cmd.validateFlags()
-	if err != nil {
-		return err
-	}
-
-	switch cmd.canonicalResourceTypeForName() {
-	case App:
-		labels, warnings, err = cmd.fetchAppLabels(username)
-	case Buildpack:
-		labels, warnings, err = cmd.fetchBuildpackLabels(username)
-	case Domain:
-		labels, warnings, err = cmd.fetchDomainLabels(username)
-	case Org:
-		labels, warnings, err = cmd.fetchOrgLabels(username)
-	case Route:
-		labels, warnings, err = cmd.fetchRouteLabels(username)
-	case Space:
-		labels, warnings, err = cmd.fetchSpaceLabels(username)
-	case Stack:
-		labels, warnings, err = cmd.fetchStackLabels(username)
+	switch cmd.RequiredArgs.ResourceType {
+	case "app":
+		err = cmd.executeApp(username)
+	case "org":
+		err = cmd.executeOrg(username)
 	default:
 		err = fmt.Errorf("Unsupported resource type of '%s'", cmd.RequiredArgs.ResourceType)
-	}
-	cmd.UI.DisplayWarnings(warnings)
-	if err != nil {
-		return err
-	}
 
-	cmd.printLabels(labels)
-	return nil
+	}
+	return err
 }
 
-func (cmd LabelsCommand) fetchAppLabels(username string) (map[string]types.NullString, v7action.Warnings, error) {
+func (cmd LabelsCommand) executeApp(username string) error {
 	err := cmd.SharedActor.CheckTarget(true, true)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 
 	cmd.UI.DisplayTextWithFlavor("Getting labels for app {{.AppName}} in org {{.OrgName}} / space {{.SpaceName}} as {{.Username}}...", map[string]interface{}{
@@ -120,120 +72,34 @@ func (cmd LabelsCommand) fetchAppLabels(username string) (map[string]types.NullS
 	})
 
 	cmd.UI.DisplayNewline()
-	return cmd.Actor.GetApplicationLabels(cmd.RequiredArgs.ResourceName, cmd.Config.TargetedSpace().GUID)
-}
-
-func (cmd LabelsCommand) fetchDomainLabels(username string) (map[string]types.NullString, v7action.Warnings, error) {
-	err := cmd.SharedActor.CheckTarget(false, false)
+	labels, warnings, err := cmd.Actor.GetApplicationLabels(cmd.RequiredArgs.ResourceName, cmd.Config.TargetedSpace().GUID)
+	cmd.UI.DisplayWarnings(warnings)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
-
-	cmd.UI.DisplayTextWithFlavor("Getting labels for domain {{.DomainName}} as {{.Username}}...", map[string]interface{}{
-		"DomainName": cmd.RequiredArgs.ResourceName,
-		"Username":   username,
-	})
-
-	cmd.UI.DisplayNewline()
-
-	return cmd.Actor.GetDomainLabels(cmd.RequiredArgs.ResourceName)
+	cmd.printLabels(labels)
+	return nil
 }
 
-func (cmd LabelsCommand) fetchOrgLabels(username string) (map[string]types.NullString, v7action.Warnings, error) {
+func (cmd LabelsCommand) executeOrg(username string) error {
 	err := cmd.SharedActor.CheckTarget(false, false)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 
 	cmd.UI.DisplayTextWithFlavor("Getting labels for org {{.OrgName}} as {{.Username}}...", map[string]interface{}{
-		"OrgName":  cmd.RequiredArgs.ResourceName,
-		"Username": username,
-	})
-
-	cmd.UI.DisplayNewline()
-	return cmd.Actor.GetOrganizationLabels(cmd.RequiredArgs.ResourceName)
-}
-
-func (cmd LabelsCommand) fetchRouteLabels(username string) (map[string]types.NullString, v7action.Warnings, error) {
-	err := cmd.SharedActor.CheckTarget(true, true)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cmd.UI.DisplayTextWithFlavor("Getting labels for route {{.RouteName}} in org {{.OrgName}} / space {{.SpaceName}} as {{.Username}}...", map[string]interface{}{
-		"RouteName": cmd.RequiredArgs.ResourceName,
-		"OrgName":   cmd.Config.TargetedOrganization().Name,
-		"SpaceName": cmd.Config.TargetedSpace().Name,
-		"Username":  username,
-	})
-
-	cmd.UI.DisplayNewline()
-
-	return cmd.Actor.GetRouteLabels(cmd.RequiredArgs.ResourceName, cmd.Config.TargetedSpace().GUID)
-}
-
-func (cmd LabelsCommand) fetchSpaceLabels(username string) (map[string]types.NullString, v7action.Warnings, error) {
-	err := cmd.SharedActor.CheckTarget(true, false)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cmd.UI.DisplayTextWithFlavor("Getting labels for space {{.SpaceName}} in org {{.OrgName}} as {{.Username}}...", map[string]interface{}{
-		"SpaceName": cmd.RequiredArgs.ResourceName,
 		"OrgName":   cmd.Config.TargetedOrganization().Name,
 		"Username":  username,
 	})
 
 	cmd.UI.DisplayNewline()
 
-	return cmd.Actor.GetSpaceLabels(cmd.RequiredArgs.ResourceName, cmd.Config.TargetedOrganization().GUID)
-}
-
-func (cmd LabelsCommand) fetchStackLabels(username string) (map[string]types.NullString, v7action.Warnings, error) {
-	err := cmd.SharedActor.CheckTarget(false, false)
+	_, warnings, err := cmd.Actor.GetOrganizationLabels(cmd.RequiredArgs.ResourceName)
+	cmd.UI.DisplayWarnings(warnings)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
-
-	cmd.UI.DisplayTextWithFlavor("Getting labels for stack {{.StackName}} as {{.Username}}...", map[string]interface{}{
-		"StackName": cmd.RequiredArgs.ResourceName,
-		"Username":  username,
-	})
-
-	cmd.UI.DisplayNewline()
-
-	return cmd.Actor.GetStackLabels(cmd.RequiredArgs.ResourceName)
-}
-
-func (cmd LabelsCommand) fetchBuildpackLabels(username string) (map[string]types.NullString, v7action.Warnings, error) {
-	err := cmd.SharedActor.CheckTarget(false, false)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var template string
-	if cmd.BuildpackStack != "" {
-		template = "Getting labels for %s {{.ResourceName}} with stack {{.StackName}} as {{.User}}..."
-	} else {
-		template = "Getting labels for %s {{.ResourceName}} as {{.User}}..."
-	}
-	preFlavoringText := fmt.Sprintf(template, cmd.RequiredArgs.ResourceType)
-	cmd.UI.DisplayTextWithFlavor(
-		preFlavoringText,
-		map[string]interface{}{
-			"ResourceName": cmd.RequiredArgs.ResourceName,
-			"StackName":    cmd.BuildpackStack,
-			"User":         username,
-		},
-	)
-
-	cmd.UI.DisplayNewline()
-
-	return cmd.Actor.GetBuildpackLabels(cmd.RequiredArgs.ResourceName, cmd.BuildpackStack)
-}
-
-func (cmd LabelsCommand) canonicalResourceTypeForName() ResourceType {
-	return ResourceType(strings.ToLower(cmd.RequiredArgs.ResourceType))
+	return nil
 }
 
 func (cmd LabelsCommand) printLabels(labels map[string]types.NullString) {
@@ -250,8 +116,8 @@ func (cmd LabelsCommand) printLabels(labels map[string]types.NullString) {
 
 	table := [][]string{
 		{
-			cmd.UI.TranslateText("key"),
-			cmd.UI.TranslateText("value"),
+			cmd.UI.TranslateText("Key"),
+			cmd.UI.TranslateText("Value"),
 		},
 	}
 
@@ -260,15 +126,4 @@ func (cmd LabelsCommand) printLabels(labels map[string]types.NullString) {
 	}
 
 	cmd.UI.DisplayTableWithHeader("", table, ui.DefaultTableSpacePadding)
-}
-
-func (cmd LabelsCommand) validateFlags() error {
-	if cmd.BuildpackStack != "" && cmd.canonicalResourceTypeForName() != Buildpack {
-		return translatableerror.ArgumentCombinationError{
-			Args: []string{
-				cmd.RequiredArgs.ResourceType, "--stack, -s",
-			},
-		}
-	}
-	return nil
 }
